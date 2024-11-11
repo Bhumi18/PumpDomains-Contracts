@@ -6,39 +6,43 @@ contract DomainRecords {
     struct RegisteredDomain {
         string nameWithTld; // Full domain name with TLD
         address owner; // Owner's address
-        uint256 registrationDate; // Timestamp of registration
-        uint256 expirationDate; // Expiration date
+        uint256 registrationDate; // Registration timestamp
+        uint256 expirationDate; // Expiration timestamp
         uint256 registrationPrice; // Price paid for registration
     }
 
     // Array to store all registered domains
-    RegisteredDomain[] public registeredDomains;
+    RegisteredDomain[] private registeredDomains;
 
     // Mapping from factory address to the array of registered domain indices
-    mapping(address => uint256[]) public domainsByFactory;
+    mapping(address => uint256[]) private domainsByFactory;
 
     // Mapping from owner address to the array of registered domain indices
-    mapping(address => uint256[]) public domainsByOwner;
+    mapping(address => uint256[]) private domainsByOwner;
 
     // Event for when a domain is added to the records
     event DomainRecorded(
-        string nameWithTld,
+        string indexed nameWithTld, // Index the domain name for easier searching in logs
         address indexed owner,
         uint256 registrationDate,
         uint256 expirationDate,
         uint256 registrationPrice,
-        address indexed factoryAddress // Include factory address in the event
+        address indexed factoryAddress
     );
 
     // Function to add a domain record
     function recordDomain(
-        string memory nameWithTld,
+        string calldata nameWithTld,
         address owner,
         uint256 registrationDate,
         uint256 expirationDate,
         uint256 registrationPrice,
-        address factoryAddress // Accept factory address
+        address factoryAddress
     ) external {
+        // Cache length for gas optimization
+        uint256 domainIndex = registeredDomains.length;
+
+        // Add the new domain directly to storage array to save gas
         registeredDomains.push(
             RegisteredDomain({
                 nameWithTld: nameWithTld,
@@ -49,11 +53,9 @@ contract DomainRecords {
             })
         );
 
-        // Link the registered domain index to the factory address
-        domainsByFactory[factoryAddress].push(registeredDomains.length - 1);
-
-        // Link the registered domain index to the owner's address
-        domainsByOwner[owner].push(registeredDomains.length - 1);
+        // Store references to the domain index
+        domainsByFactory[factoryAddress].push(domainIndex);
+        domainsByOwner[owner].push(domainIndex);
 
         emit DomainRecorded(
             nameWithTld,
@@ -65,7 +67,7 @@ contract DomainRecords {
         );
     }
 
-    // Function to get all registered domains
+    // Optimized function to get all registered domains
     function getAllRegisteredDomains()
         external
         view
@@ -86,12 +88,13 @@ contract DomainRecords {
     function getDomainsByFactory(
         address factoryAddress
     ) external view returns (RegisteredDomain[] memory) {
-        uint256[] memory indices = domainsByFactory[factoryAddress];
+        uint256[] storage indices = domainsByFactory[factoryAddress];
+        uint256 length = indices.length;
         RegisteredDomain[] memory domainsForFactory = new RegisteredDomain[](
-            indices.length
+            length
         );
 
-        for (uint256 i = 0; i < indices.length; i++) {
+        for (uint256 i = 0; i < length; ++i) {
             domainsForFactory[i] = registeredDomains[indices[i]];
         }
 
@@ -102,12 +105,13 @@ contract DomainRecords {
     function getDomainsByOwner(
         address owner
     ) external view returns (RegisteredDomain[] memory) {
-        uint256[] memory indices = domainsByOwner[owner];
+        uint256[] storage indices = domainsByOwner[owner];
+        uint256 length = indices.length;
         RegisteredDomain[] memory domainsForOwner = new RegisteredDomain[](
-            indices.length
+            length
         );
 
-        for (uint256 i = 0; i < indices.length; i++) {
+        for (uint256 i = 0; i < length; ++i) {
             domainsForOwner[i] = registeredDomains[indices[i]];
         }
 

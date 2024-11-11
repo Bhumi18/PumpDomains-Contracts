@@ -2,37 +2,44 @@
 pragma solidity ^0.8.0;
 
 import "./PumpDomains.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract TLDFactory {
-    // Event emitted when a new TLD is deployed
+contract TLDFactory is Ownable {
+    struct Config {
+        address resolver;
+        address domainRecords;
+        address payable feeReceiver;
+        uint256 fee;
+    }
+    Config public config;
+
+    mapping(string => address) private tlds;
+
     event TLDDeployed(
         address indexed creator,
         address indexed tldAddress,
-        string tldName
+        string indexed tldName
     );
 
-    // Mapping to store deployed TLD contracts
-    mapping(string => address) public tldContracts;
-
-    // Static public resolver address
-    address public publicResolver;
-    address public domainRecordsAddress;
-
-    // Fee for creating a TLD
-    uint256 public constant TLD_CREATION_FEE = 50 * 1e18;
-
-    // Address to receive the fees (owner of the contract)
-    address payable public feeReceiver;
-
-    // Constructor to set the public resolver address and fee receiver (owner)
     constructor(
-        address _publicResolver,
+        address _resolver,
+        address _domainRecords,
         address payable _feeReceiver,
-        address _domainRecordsAddress
-    ) {
-        publicResolver = _publicResolver;
-        feeReceiver = _feeReceiver;
-        domainRecordsAddress = _domainRecordsAddress;
+        uint256 _fee
+    ) Ownable(msg.sender) {
+        require(
+            _resolver != address(0) &&
+                _feeReceiver != address(0) &&
+                _domainRecords != address(0),
+            "Invalid address"
+        );
+
+        config = Config({
+            resolver: _resolver,
+            domainRecords: _domainRecords,
+            feeReceiver: _feeReceiver,
+            fee: _fee
+        });
     }
 
     // Deploy a new PumpDomains contract for a specific TLD and collect a fee
@@ -41,30 +48,24 @@ contract TLDFactory {
         string memory symbol,
         string memory tld
     ) external payable returns (address) {
-        require(tldContracts[tld] == address(0), "TLD already exists");
-        require(
-            msg.value >= TLD_CREATION_FEE,
-            "Insufficient funds sent for TLD creation"
-        );
+        require(tlds[tld] == address(0), "TLD already exists");
+        require(msg.value == config.fee, "Incorrect TLD creation fee");
 
         // Forward the TLD creation fee to the feeReceiver
-        (bool feeSent, ) = feeReceiver.call{value: msg.value}("");
-        require(feeSent, "Failed to send TLD creation fee to feeReceiver");
+        (bool sent, ) = config.feeReceiver.call{value: msg.value}("");
+        require(sent, "Fee transfer failed");
 
-        // Create a new PumpDomains contract instance with the predefined public resolver address and feeReceiver
+        // Create a new PumpDomains contract instance
         PumpDomains newTLD = new PumpDomains(
             name,
             symbol,
             tld,
-            publicResolver,
-            feeReceiver,
-            domainRecordsAddress
+            config.resolver,
+            config.feeReceiver,
+            config.domainRecords
         );
 
-        // Store the address of the newly deployed TLD contract
-        tldContracts[tld] = address(newTLD);
-
-        // Transfer ownership of the new contract to the sender
+        tlds[tld] = address(newTLD);
         newTLD.transferOwnership(msg.sender);
 
         emit TLDDeployed(msg.sender, address(newTLD), tld);
@@ -72,18 +73,33 @@ contract TLDFactory {
         return address(newTLD);
     }
 
-    // Allow the owner to withdraw any accumulated funds
-    function withdrawFunds() external {
-        require(
-            msg.sender == feeReceiver,
-            "Only the fee receiver can withdraw funds"
-        );
-        (bool success, ) = feeReceiver.call{value: address(this).balance}("");
+    // Allow the fee receiver to withdraw any accumulated funds
+    function withdraw() external {
+        require(msg.sender == config.feeReceiver, "Not authorized");
+        (bool success, ) = config.feeReceiver.call{
+            value: address(this).balance
+        }("");
         require(success, "Withdrawal failed");
     }
 
     // Get the address of a TLD contract
-    function getTLDAddress(string memory tld) external view returns (address) {
-        return tldContracts[tld];
+    function getTLDAddress(
+        string calldata tld
+    ) external view returns (address) {
+        return tlds[tld];
+    }
+
+    function setConfig(
+        address _resolver,
+        address _domainRecords,
+        address payable _feeReceiver,
+        uint256 _fee
+    ) external onlyOwner {
+        config = Config({
+            resolver: _resolver,
+            domainRecords: _domainRecords,
+            feeReceiver: _feeReceiver,
+            fee: _fee
+        });
     }
 }
